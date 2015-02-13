@@ -1,0 +1,214 @@
+U,ATI
+I,U (m/s),1,input,numeric
+/**
+ * This simple protocol file allows DAQfactory to
+ * add ATI sonic anemometers as serial devices, complete
+ * with input channels and proper data message parsing.
+ *
+ * To use, place this file in the DAQfactory installation
+ * folder (try C:\daqfactory\, C:\Program Files\daqfactory)
+ * prior to launching DAQfactory. Create a new user-defined
+ * serial device and select "ATI" from protocols list.
+ *
+ * Version 1.0.20110728
+ * patrick.okeeffe@email.wsu.edu
+ *
+ */
+
+// placeholder channel for U-axis wind speed
+
+ENDIO
+
+I,V (m/s),2,input,numeric
+// placeholder channel for V-axis wind speed
+
+ENDIO
+
+I,W (m/s),3,input,numeric
+// placeholder channel for W-axis wind speed
+
+ENDIO
+
+I,Ts (*C),4,input,numeric
+// placeholder channel for sonic temperature
+
+ENDIO
+
+I,dropout-U,5,input,numeric
+// boolean channel to highlight 9999 values
+
+ENDIO
+
+I,dropout-V,6,input,numeric
+// boolean channel to highlight 9999 values
+
+ENDIO
+
+I,dropout-W,7,input,numeric
+// boolean channel to highlight 9999 values
+
+ENDIO
+
+I,dropout-Ts,8,input,numeric
+// boolean channel to highlight 9999 values
+
+ENDIO
+
+I,Status,9,input,string
+// place to post messages to
+
+ENDIO
+
+F,Poll,1
+function Poll(string out, numBytes)
+// this function will poll the port with given string and read
+// the response until the given character.  Returns NULL (empty)
+// if there is an error
+if (argc < 2)
+   throw("Invalid number of parameters")
+endif
+private string in
+try
+   if (!LockPort())
+      throw("Unable to lock port")
+   endif
+   Purge()
+   Write(out)
+   if (numBytes > 0)
+      in = Read(numBytes) 
+   endif
+   UnlockPort()
+   return(in)
+catch()
+   UnlockPort()
+   throw()
+endcatch
+return(NULL)
+
+ENDIO
+
+F,PollUntil,1
+function PollUntil(string out, until)
+// this function will poll the port with given string and read
+// the response until the given character.  Returns NULL (empty)
+// if there is an error
+if (argc < 2)
+   throw("Invalid number of parameters")
+endif
+private string in
+try
+   if (!LockPort())
+      throw("Unable to lock port")
+   endif
+   Purge()
+   Write(out)
+   in = ReadUntil(until) 
+   UnlockPort()
+   return(in)
+catch()
+   UnlockPort()
+   throw()
+endcatch
+return(NULL)
+
+ENDIO
+
+F,parseData,1
+function parseData(stamp)
+   ReadUntil(85) // gulp U
+   private Ux = To.rWord(AscA(Read(2))) / 100
+   ReadUntil(86) // gulp V
+   private Uy = To.rWord(AscA(Read(2))) / 100
+   ReadUntil(87) // gulp W
+   private Uz = To.rWord(AscA(Read(2))) / 100
+   ReadUntil(84) // gulp T
+   private Ts = To.rWord(AscA(Read(2))) / 100
+   
+   if (Abs(Ux) > 99.98)
+      Local.Channel.AddValue(strDevice,0,"U (m/s)",0,InsertTime(NAN(),stamp.time,0))
+      Local.Channel.AddValue(strDevice,0,"dropout-U",0,InsertTime(1,stamp.time,0))   
+	else
+      Local.Channel.AddValue(strDevice,0,"U (m/s)",0,InsertTime(Ux,stamp.time,0))
+      Local.Channel.AddValue(strDevice,0,"dropout-U",0,InsertTime(0,stamp.time,0))   
+   endif
+   
+   if (Abs(Uy) > 99.98)
+      Local.Channel.AddValue(strDevice,0,"V (m/s)",0,InsertTime(NAN(),stamp.time,0))
+      Local.Channel.AddValue(strDevice,0,"dropout-V",0,InsertTime(1,stamp.time,0))   
+	else
+      Local.Channel.AddValue(strDevice,0,"V (m/s)",0,InsertTime(Uy,stamp.time,0))
+      Local.Channel.AddValue(strDevice,0,"dropout-V",0,InsertTime(0,stamp.time,0))   
+   endif
+   
+   if (Abs(Uz) > 99.98)
+      Local.Channel.AddValue(strDevice,0,"W (m/s)",0,InsertTime(NAN(),stamp.time,0))
+      Local.Channel.AddValue(strDevice,0,"dropout-W",0,InsertTime(1,stamp.time,0))   
+	else
+      Local.Channel.AddValue(strDevice,0,"W (m/s)",0,InsertTime(Uz,stamp.time,0))
+      Local.Channel.AddValue(strDevice,0,"dropout-W",0,InsertTime(0,stamp.time,0))   
+   endif
+   
+   if (Abs(Ts) > 99.98)
+      Local.Channel.AddValue(strDevice,0,"Ts (*C)",0,InsertTime(NAN(),stamp.time,0))
+      Local.Channel.AddValue(strDevice,0,"dropout-Ts",0,InsertTime(1,stamp.time,0))   
+	else
+      Local.Channel.AddValue(strDevice,0,"Ts (*C)",0,InsertTime(Ts,stamp.time,0))
+      Local.Channel.AddValue(strDevice,0,"dropout-Ts",0,InsertTime(0,stamp.time,0))   
+   endif   
+
+ENDIO
+
+F,reset,0
+print("Initializing device...")
+purge()
+local lastChr = 0
+
+ENDIO
+
+F,nowTimeString,0
+Function nowTimeString()
+return (FormatDateTime("%Y/%m/%d %H:%M:%S",SysTime()))
+
+ENDIO
+
+F,print,1
+Function print(string msg)   
+   private string out = nowTimeString()+" "+strDevice+": "+msg
+   Local.Channel.AddValue(strDevice,0,"Status",0,out)
+
+ENDIO
+
+F,listen,0
+Function listen()
+   if (argc>0)
+      throw(strDevice+": Too many parameters passed to listen()")
+   endif
+   isListening = !isListening
+   return (NULL)
+
+ENDIO
+
+E,OnLoad
+reset()  // & initalize the local variables
+print("Finished loading device")
+
+ENDIO
+
+E,OnUnload
+print ("Unloading device...")
+
+ENDIO
+
+E,OnReceive
+if ((strIn == Chr(0)) && (lastChr == 128))
+   private stamp = 0
+   parseData(stamp)
+endif
+lastChr = Asc(strIn)
+
+ENDIO
+
+E,OnSend
+
+ENDIO
+
